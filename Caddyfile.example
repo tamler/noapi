@@ -1,0 +1,13 @@
+# noapi reverse proxy configuration for Caddy
+#
+# Usage:
+#   1. Copy this file to /etc/caddy/Caddyfile (or your Caddy config location)
+#   2. Replace "your-domain.com" with your actual domain
+#   3. Caddy will automatically provision TLS certificates via Let's Encrypt
+#   4. Reload Caddy: sudo systemctl reload caddy
+#
+# The noapi server should be running on localhost:8000
+
+your-domain.com {
+    reverse_proxy localhost:8000
+}
