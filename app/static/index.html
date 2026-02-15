@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>noapi Dashboard</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>noapi</h1>
+        <nav>
+            <a href="#jobs" class="tab active" data-tab="jobs">Jobs</a>
+            <a href="#workers" class="tab" data-tab="workers">Workers</a>
+            <a href="#plugins" class="tab" data-tab="plugins">Plugins</a>
+        </nav>
+    </header>
+    <main>
+        <section id="tab-jobs" class="tab-content active">
+            <div id="jobs-list-view">
+                <div class="upload-area" id="upload-area">
+                    <input type="file" id="job-file" accept=".json" hidden>
+                    <p>Drop job spec JSON here or <button onclick="document.getElementById('job-file').click()">browse</button></p>
+                </div>
+                <div id="upload-feedback"></div>
+                <table id="jobs-table">
+                    <thead>
+                        <tr>
+                            <th>Project</th><th>Status</th><th>Progress</th>
+                            <th>Queued</th><th>Running</th><th>Completed</th><th>Failed</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody id="jobs-tbody"></tbody>
+                </table>
+            </div>
+            <div id="job-detail-view" style="display:none">
+                <button id="back-to-jobs" onclick="showJobsList()">Back to Jobs</button>
+                <div id="job-header"></div>
+                <div id="needs-human-section"></div>
+                <h3>Tasks</h3>
+                <table id="tasks-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th><th>Type</th><th>Status</th><th>Worker</th>
+                            <th>Attempts</th><th>Error</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-tbody"></tbody>
+                </table>
+                <h3>Artifacts</h3>
+                <div id="artifacts-grid" class="artifacts-grid"></div>
+            </div>
+        </section>
+        <section id="tab-workers" class="tab-content">
+            <table id="workers-table">
+                <thead>
+                    <tr><th>Worker ID</th><th>Hostname</th><th>Plugin</th><th>Last Seen</th><th>Status</th></tr>
+                </thead>
+                <tbody id="workers-tbody"></tbody>
+            </table>
+        </section>
+        <section id="tab-plugins" class="tab-content">
+            <div id="plugins-container" class="plugins-grid"></div>
+        </section>
+    </main>
+    <script src="/static/app.js"></script>
+</body>
+</html>
