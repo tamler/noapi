@@ -1,0 +1,50 @@
+{
+    "name": "example_service",
+    "display_name": "Example Service",
+    "version": "0.1.0",
+    "documented_at": "2025-06-15",
+    "auth_url": "https://example.com/login",
+    "base_url": "https://example.com/app",
+    "capabilities": {
+        "task_types": [
+            {
+                "name": "generate_image",
+                "description": "Generate an image from a text prompt",
+                "params_schema": {
+                    "prompt": { "type": "string", "required": true },
+                    "aspect_ratio": {
+                        "type": "string",
+                        "required": false,
+                        "default": "1:1",
+                        "enum": ["1:1", "16:9", "9:16"]
+                    },
+                    "style_ref": {
+                        "type": "string",
+                        "required": false
+                    }
+                },
+                "artifact_kind": "image",
+                "typical_duration_s": 60,
+                "max_timeout_s": 300
+            },
+            {
+                "name": "upscale_image",
+                "description": "Upscale an existing image to higher resolution",
+                "params_schema": {
+                    "input_image": { "type": "string", "required": true },
+                    "scale_factor": {
+                        "type": "string",
+                        "required": false,
+                        "default": "2x",
+                        "enum": ["2x", "4x"]
+                    }
+                },
+                "artifact_kind": "image",
+                "typical_duration_s": 30,
+                "max_timeout_s": 120
+            }
+        ],
+        "pipeline_support": true,
+        "auth_method": "browser_session"
+    }
+}
