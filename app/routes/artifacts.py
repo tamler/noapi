@@ -6,8 +6,9 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from app.qc.basic import compute_sha256, generate_artifact_filename
@@ -21,7 +22,7 @@ _VIDEO_EXTS = {".mp4", ".webm"}
 
 
 def _determine_kind(filename: str) -> str:
-    """Determine artifact kind from file extension."""
+    """Fallback: determine artifact kind from file extension."""
     ext = Path(filename).suffix.lower()
     if ext in _IMAGE_EXTS:
         return "image"
@@ -64,11 +65,22 @@ async def download_artifact(artifact_id: str):
 
 
 @router.post("/upload/{job_id}/{task_id}")
-async def upload_artifact(job_id: str, task_id: str, file: UploadFile):
-    """Upload an artifact file for a task."""
+async def upload_artifacts(
+    job_id: str,
+    task_id: str,
+    files: List[UploadFile] = File(...),
+    artifacts_manifest: str = Form("[]"),
+    task_metadata: str = Form("{}"),
+):
+    """Upload artifact files for a task.
+
+    files: one or more artifact files.
+    artifacts_manifest: JSON array parallel to files. Each entry:
+        {"kind": "image", "filename_hint": "...", "metadata": {...}}
+    task_metadata: JSON object with task-level metadata from FlowResult.
+    """
     from app.main import db
 
-    # Validate job and task exist
     job = await db.get_job(job_id)
     if not job:
         raise HTTPException(404, f"Job '{job_id}' not found")
@@ -77,98 +89,126 @@ async def upload_artifact(job_id: str, task_id: str, file: UploadFile):
     if not task:
         raise HTTPException(404, f"Task '{task_id}' not found")
 
-    original_filename = file.filename or "unknown"
-    kind = _determine_kind(original_filename)
-
-    # Create artifact directory
-    artifact_dir = settings.jobs_dir / job_id / "artifacts" / kind
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save to temp location
-    ext = Path(original_filename).suffix.lower() or ".bin"
-    temp_path = artifact_dir / f"_tmp_{uuid.uuid4()}{ext}"
     try:
-        content = await file.read()
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        manifest = json.loads(artifacts_manifest)
+    except json.JSONDecodeError:
+        manifest = []
 
-        # Compute hash
-        sha256 = compute_sha256(temp_path)
-        file_size = temp_path.stat().st_size
+    try:
+        task_meta = json.loads(task_metadata)
+    except json.JSONDecodeError:
+        task_meta = {}
 
-        # Check for duplicates
-        duplicate = await db.find_duplicate(job_id, sha256)
-        is_duplicate = duplicate is not None
+    # Determine naming prefix
+    from app.schemas import JobSpec
+    spec = JobSpec.model_validate_json(job.spec_json)
+    naming_prefix = spec.naming_prefix or job.project_name or "artifact"
 
-        # Generate deterministic filename
-        from app.schemas import JobSpec
-        spec = JobSpec.model_validate_json(job.spec_json)
-        naming_prefix = spec.naming_prefix or job.project_name or "artifact"
+    # Count existing artifacts for variant numbering
+    existing = await db.get_artifacts(task_id=task_id)
+    variant_offset = len(existing)
 
-        # Count existing artifacts for this task to determine variant number
-        existing = await db.get_artifacts(task_id=task_id)
-        variant = len(existing)
+    results = []
+    for idx, file in enumerate(files):
+        # Get manifest entry for this file (or use defaults)
+        entry = manifest[idx] if idx < len(manifest) else {}
+        kind = entry.get("kind") or _determine_kind(file.filename or "unknown")
+        filename_hint = entry.get("filename_hint")
+        artifact_metadata = entry.get("metadata", {})
 
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        final_name = generate_artifact_filename(
-            naming_prefix=naming_prefix,
-            plugin=task.plugin,
-            task_type=task.task_type,
-            variant=variant,
-            sha256=sha256,
-            timestamp=timestamp,
-            extension=ext.lstrip("."),
-        )
-        final_path = artifact_dir / final_name
-        os.rename(str(temp_path), str(final_path))
+        original_filename = file.filename or "unknown"
 
-        # Write sidecar JSON
-        sidecar = {
-            "job_id": job_id,
-            "task_id": task_id,
-            "plugin": task.plugin,
-            "task_type": task.task_type,
-            "original_filename": original_filename,
-            "sha256": sha256,
-            "file_size_bytes": file_size,
-            "is_duplicate": is_duplicate,
-            "kind": kind,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        sidecar_path = final_path.with_suffix(final_path.suffix + ".json")
-        with open(sidecar_path, "w") as sf:
-            json.dump(sidecar, sf, indent=2)
+        # Create artifact directory: data/jobs/{job_id}/artifacts/{kind}/
+        artifact_dir = settings.jobs_dir / job_id / "artifacts" / kind
+        artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        # Insert artifact record
-        artifact_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
-        artifact = ArtifactRecord(
-            id=artifact_id,
-            job_id=job_id,
-            task_id=task_id,
-            plugin=task.plugin,
-            kind=kind,
-            filepath=str(final_path),
-            original_filename=original_filename,
-            sha256=sha256,
-            file_size_bytes=file_size,
-            is_duplicate=is_duplicate,
-            metadata_json=json.dumps(sidecar),
-            created_at=now,
-        )
-        await db.insert_artifact(artifact)
+        ext = Path(original_filename).suffix.lower() or ".bin"
+        temp_path = artifact_dir / f"_tmp_{uuid.uuid4()}{ext}"
+        try:
+            content = await file.read()
+            with open(temp_path, "wb") as f:
+                f.write(content)
 
-        return {
-            "status": "uploaded",
-            "artifact_id": artifact_id,
-            "filename": final_name,
-            "kind": kind,
-            "is_duplicate": is_duplicate,
-            "sha256": sha256,
-            "file_size_bytes": file_size,
-        }
-    except Exception:
-        # Clean up temp file on error
-        if temp_path.exists():
-            temp_path.unlink()
-        raise
+            sha256 = compute_sha256(temp_path)
+            file_size = temp_path.stat().st_size
+
+            # Duplicate detection within the same job
+            duplicate = await db.find_duplicate(job_id, sha256)
+            is_duplicate = duplicate is not None
+
+            # Deterministic filename (core owns naming)
+            variant = variant_offset + idx
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            final_name = generate_artifact_filename(
+                naming_prefix=naming_prefix,
+                plugin=task.plugin,
+                task_type=task.task_type,
+                variant=variant,
+                sha256=sha256,
+                timestamp=timestamp,
+                extension=ext.lstrip("."),
+            )
+            final_path = artifact_dir / final_name
+            os.rename(str(temp_path), str(final_path))
+
+            # Sidecar JSON
+            sidecar = {
+                "job_id": job_id,
+                "task_id": task_id,
+                "plugin": task.plugin,
+                "task_type": task.task_type,
+                "original_filename": original_filename,
+                "filename_hint": filename_hint,
+                "sha256": sha256,
+                "file_size_bytes": file_size,
+                "is_duplicate": is_duplicate,
+                "kind": kind,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "task_metadata": task_meta,
+                "artifact_metadata": artifact_metadata,
+            }
+            sidecar_path = final_path.with_suffix(final_path.suffix + ".json")
+            with open(sidecar_path, "w") as sf:
+                json.dump(sidecar, sf, indent=2)
+
+            # DB record
+            artifact_id = str(uuid.uuid4())
+            now = datetime.now(timezone.utc).isoformat()
+
+            # Merge artifact-level + task-level metadata into stored metadata
+            stored_metadata = {
+                "filename_hint": filename_hint,
+                "artifact_metadata": artifact_metadata,
+                "task_metadata": task_meta,
+            }
+
+            artifact = ArtifactRecord(
+                id=artifact_id,
+                job_id=job_id,
+                task_id=task_id,
+                plugin=task.plugin,
+                kind=kind,
+                filepath=str(final_path),
+                original_filename=original_filename,
+                sha256=sha256,
+                file_size_bytes=file_size,
+                is_duplicate=is_duplicate,
+                metadata_json=json.dumps(stored_metadata),
+                created_at=now,
+            )
+            await db.insert_artifact(artifact)
+
+            results.append({
+                "artifact_id": artifact_id,
+                "filename": final_name,
+                "kind": kind,
+                "is_duplicate": is_duplicate,
+                "sha256": sha256,
+                "file_size_bytes": file_size,
+            })
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+
+    return {"status": "uploaded", "artifacts": results}

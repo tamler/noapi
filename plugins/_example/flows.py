@@ -10,6 +10,7 @@ The worker discovers this class automatically via introspection.
 from __future__ import annotations
 
 from app.schemas import (
+    ArtifactSpec,
     FlowError,
     FlowResult,
     HealthCheckResult,
@@ -93,16 +94,30 @@ class ExampleServiceFlow(SiteFlowBase):
         #     raise FlowError(message)
 
         # Step 6: Download
-        # Use the browser helper download_artifact() or direct download:
         # from app.workers.browser import download_artifact
-        # path = await download_artifact(page, lambda: page.click(selectors.DOWNLOAD_BUTTON), download_dir)
+        # path = await download_artifact(
+        #     page, lambda: page.click(selectors.DOWNLOAD_BUTTON), download_dir
+        # )
 
-        # Template return -- replace with actual artifact paths
+        # Template return -- replace with actual artifacts
+        # In a real plugin, you'd return:
+        # return FlowResult(
+        #     success=True,
+        #     artifacts=[
+        #         ArtifactSpec(
+        #             kind="image",
+        #             local_path=path,
+        #             filename_hint=f"gen_{aspect_ratio}.png",
+        #             metadata={"prompt": prompt, "aspect_ratio": aspect_ratio},
+        #         )
+        #     ],
+        #     metadata={"prompt": prompt, "aspect_ratio": aspect_ratio},
+        # )
+
         return FlowResult(
             success=True,
-            artifact_paths=[],  # e.g., [path]
+            artifacts=[],
             metadata={"prompt": prompt, "aspect_ratio": aspect_ratio},
-            screenshots=[],
         )
 
     async def _upscale_image(self, page, payload: dict, download_dir: str) -> FlowResult:
@@ -119,31 +134,30 @@ class ExampleServiceFlow(SiteFlowBase):
         scale_factor = payload.get("scale_factor", "2x")
 
         # Similar pattern to generate -- navigate, interact, wait, download
-        # await page.goto("https://example.com/app/upscale")
-        # await page.set_input_files(selectors.UPSCALE_INPUT, input_image)
-        # await page.select_option(selectors.UPSCALE_FACTOR_SELECT, scale_factor)
-        # await page.click(selectors.UPSCALE_BUTTON)
-        # await page.wait_for_selector(selectors.UPSCALE_RESULT, timeout=120000)
+        # In a real plugin:
+        # return FlowResult(
+        #     success=True,
+        #     artifacts=[
+        #         ArtifactSpec(
+        #             kind="image",
+        #             local_path=downloaded_path,
+        #             filename_hint=f"upscale_{scale_factor}.png",
+        #             metadata={"scale_factor": scale_factor},
+        #         )
+        #     ],
+        #     metadata={"input_image": input_image, "scale_factor": scale_factor},
+        # )
 
         return FlowResult(
             success=True,
-            artifact_paths=[],
+            artifacts=[],
             metadata={"input_image": input_image, "scale_factor": scale_factor},
-            screenshots=[],
         )
 
     async def health_check(self, page) -> HealthCheckResult:
-        """Best-effort check of which selectors are present on the site.
-
-        Navigate to the base URL (without logging in) and check which
-        key selectors exist. This helps diagnose selector drift when
-        the target site updates its UI.
-        """
+        """Best-effort check of which selectors are present on the site."""
         found = []
         missing = []
-
-        # Navigate to the public page
-        # await page.goto("https://example.com/app")
 
         key_selectors = {
             "login_form": selectors.LOGIN_FORM,

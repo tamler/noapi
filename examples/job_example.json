@@ -26,7 +26,26 @@
                 "input_image": "{artifact_path}",
                 "scale_factor": "2x"
             },
+            "input_selector": {
+                "kind": "image",
+                "pick": "first"
+            },
             "trigger_mode": "each",
+            "outputs_per_input": 1
+        },
+        {
+            "source_ref": "base_images",
+            "plugin": "example_service",
+            "task_type": "upscale_image",
+            "param_template": {
+                "input_image": "{artifact_paths}",
+                "scale_factor": "4x"
+            },
+            "input_selector": {
+                "kind": "image",
+                "pick": "all"
+            },
+            "trigger_mode": "all",
             "outputs_per_input": 1
         }
     ],

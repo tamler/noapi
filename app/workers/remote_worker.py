@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-from app.schemas import FlowError, NeedsHumanError, SiteFlowBase
+from app.schemas import ArtifactSpec, FlowError, FlowResult, NeedsHumanError, SiteFlowBase
 
 logger = logging.getLogger("noapi.worker")
 
@@ -104,23 +104,49 @@ class RemoteWorker:
                 logger.warning("Heartbeat failed for task %s", task_id)
 
     async def upload_artifacts(
-        self, client: httpx.AsyncClient, job_id: str, task_id: str, paths: list[str]
+        self,
+        client: httpx.AsyncClient,
+        job_id: str,
+        task_id: str,
+        artifacts: list[ArtifactSpec],
+        task_metadata: dict | None = None,
     ) -> None:
-        """Upload artifact files to the server."""
-        for file_path in paths:
-            p = Path(file_path)
-            if not p.exists():
-                logger.warning("Artifact not found, skipping: %s", file_path)
-                continue
-            with open(p, "rb") as f:
-                files = {"file": (p.name, f)}
-                resp = await client.post(
-                    f"{self.server_url}/api/upload/{job_id}/{task_id}",
-                    files=files,
-                    headers=self._headers(),
-                )
-                resp.raise_for_status()
-            logger.info("Uploaded artifact: %s", p.name)
+        """Upload artifact files to the server with manifest metadata."""
+        valid = [a for a in artifacts if Path(a.local_path).exists()]
+        if not valid:
+            return
+
+        skipped = len(artifacts) - len(valid)
+        if skipped:
+            logger.warning("Skipping %d artifacts with missing local_path", skipped)
+
+        file_tuples = []
+        manifest = []
+        for art in valid:
+            p = Path(art.local_path)
+            file_tuples.append(("files", (p.name, open(p, "rb"))))
+            manifest.append({
+                "kind": art.kind,
+                "filename_hint": art.filename_hint,
+                "metadata": art.metadata,
+            })
+
+        try:
+            data = {
+                "artifacts_manifest": json.dumps(manifest),
+                "task_metadata": json.dumps(task_metadata or {}),
+            }
+            resp = await client.post(
+                f"{self.server_url}/api/upload/{job_id}/{task_id}",
+                files=file_tuples,
+                data=data,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            logger.info("Uploaded %d artifacts for task %s", len(valid), task_id)
+        finally:
+            for _, (_, fobj) in file_tuples:
+                fobj.close()
 
     async def run(self) -> None:
         """Main worker loop."""
@@ -169,14 +195,12 @@ class RemoteWorker:
                         # Execute the plugin flow
                         result = await self.flow.execute(page, payload, download_dir)
 
-                        # Upload artifacts and screenshots
-                        if result.artifact_paths:
+                        # Upload artifacts (kind comes from ArtifactSpec, not extension)
+                        if result.artifacts:
                             await self.upload_artifacts(
-                                client, job_id, task_id, result.artifact_paths
-                            )
-                        if result.screenshots:
-                            await self.upload_artifacts(
-                                client, job_id, task_id, result.screenshots
+                                client, job_id, task_id,
+                                result.artifacts,
+                                task_metadata=result.metadata,
                             )
 
                         # Report completion
@@ -192,10 +216,10 @@ class RemoteWorker:
 
                     except NeedsHumanError as e:
                         logger.warning("Task %s needs human: %s", task_id, e.message)
-                        screenshot = e.screenshot_path
-                        if screenshot:
+                        if e.screenshot_path:
                             await self.upload_artifacts(
-                                client, job_id, task_id, [screenshot]
+                                client, job_id, task_id,
+                                [ArtifactSpec(kind="screenshot", local_path=e.screenshot_path)],
                             )
                         await client.post(
                             f"{self.server_url}/api/tasks/{task_id}/fail",
@@ -203,7 +227,6 @@ class RemoteWorker:
                                 "worker_id": self.worker_id,
                                 "error": e.message,
                                 "needs_human": True,
-                                "screenshot_path": screenshot,
                             },
                             headers=self._headers(),
                         )
@@ -211,15 +234,16 @@ class RemoteWorker:
                     except (FlowError, Exception) as e:
                         logger.error("Task %s failed: %s", task_id, str(e))
                         ss = await screenshot_on_error(page, task_id, screenshot_dir)
-                        await self.upload_artifacts(client, job_id, task_id, [ss])
-                        needs_human = isinstance(e, FlowError) and False
+                        await self.upload_artifacts(
+                            client, job_id, task_id,
+                            [ArtifactSpec(kind="screenshot", local_path=ss)],
+                        )
                         await client.post(
                             f"{self.server_url}/api/tasks/{task_id}/fail",
                             json={
                                 "worker_id": self.worker_id,
                                 "error": str(e),
-                                "needs_human": needs_human,
-                                "screenshot_path": ss,
+                                "needs_human": isinstance(e, FlowError),
                             },
                             headers=self._headers(),
                         )

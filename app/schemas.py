@@ -14,11 +14,19 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 
 @dataclass
+class ArtifactSpec:
+    """Describes one artifact produced by a plugin flow."""
+    kind: str  # "image", "video", "screenshot", "other"
+    local_path: str  # path on the WORKER machine
+    filename_hint: str | None = None  # optional suggested name
+    metadata: dict = field(default_factory=dict)  # per-artifact metadata
+
+
+@dataclass
 class FlowResult:
     success: bool
-    artifact_paths: list[str] = field(default_factory=list)
+    artifacts: list[ArtifactSpec] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
-    screenshots: list[str] = field(default_factory=list)
 
 
 class NeedsHumanError(Exception):
@@ -79,13 +87,24 @@ class VariantExpansion(BaseModel):
     ref_id: str | None = None
 
 
+class InputSelector(BaseModel):
+    """Selects which artifacts from upstream tasks feed into a pipeline step."""
+    kind: str = "any"    # "image", "video", "any"
+    pick: str = "first"  # "first", "all"
+
+
 class PipelineStep(BaseModel):
     source_ref: str
     plugin: str
     task_type: str
     param_template: dict[str, Any]
+    input_selector: InputSelector = None  # type: ignore[assignment]
     outputs_per_input: int = 1
     trigger_mode: str = "each"
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.input_selector is None:
+            self.input_selector = InputSelector()
 
 
 class JobSpec(BaseModel):

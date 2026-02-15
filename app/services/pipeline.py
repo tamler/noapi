@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.db import Database
-from app.schemas import JobRecord, JobSpec, PipelineStep, TaskRecord
+from app.schemas import ArtifactRecord, InputSelector, JobRecord, JobSpec, PipelineStep, TaskRecord
 
 
 def _now() -> str:
@@ -27,6 +27,37 @@ def _resolve_template(template: dict[str, Any], variables: dict[str, Any]) -> di
                 value = value.replace(f"{{{var_name}}}", str(var_value) if not isinstance(var_value, str) else var_value)
         resolved[key] = value
     return resolved
+
+
+def select_artifacts(
+    artifacts: list[ArtifactRecord], selector: InputSelector
+) -> list[ArtifactRecord]:
+    """Filter and pick artifacts according to an InputSelector."""
+    # Filter by kind
+    if selector.kind != "any":
+        artifacts = [a for a in artifacts if a.kind == selector.kind]
+
+    # Stable ordering: by created_at then id
+    artifacts = sorted(artifacts, key=lambda a: (a.created_at, a.id))
+
+    # Pick
+    if selector.pick == "first" and artifacts:
+        return [artifacts[0]]
+    return artifacts
+
+
+def _build_template_variables(selected: list[ArtifactRecord]) -> dict[str, str]:
+    """Build template variables from selected artifacts."""
+    variables: dict[str, str] = {}
+    if selected:
+        # Singular (always the first)
+        variables["artifact_id"] = selected[0].id
+        variables["artifact_path"] = selected[0].filepath
+        variables["artifact_kind"] = selected[0].kind
+    # Plural (always available)
+    variables["artifact_ids"] = json.dumps([a.id for a in selected])
+    variables["artifact_paths"] = json.dumps([a.filepath for a in selected])
+    return variables
 
 
 class PipelineResolver:
@@ -54,9 +85,12 @@ class PipelineResolver:
     async def _trigger_each(self, step: PipelineStep, completed_task: TaskRecord, job_record: JobRecord) -> list[TaskRecord]:
         """Create downstream tasks for a single completed upstream task."""
         artifacts = await self.db.get_artifacts(task_id=completed_task.id)
-        artifact_path = artifacts[0].filepath if artifacts else ""
+        selected = select_artifacts(artifacts, step.input_selector)
 
-        variables = {"artifact_path": artifact_path}
+        if not selected:
+            return []
+
+        variables = _build_template_variables(selected)
         params = _resolve_template(step.param_template, variables)
 
         created = []
@@ -78,13 +112,18 @@ class PipelineResolver:
         if not all(t.status == "completed" for t in all_ref_tasks):
             return []
 
-        # Gather all artifact paths from all completed tasks
-        all_paths = []
+        # Gather all artifacts from all completed tasks
+        all_artifacts: list[ArtifactRecord] = []
         for t in all_ref_tasks:
             artifacts = await self.db.get_artifacts(task_id=t.id)
-            all_paths.extend(a.filepath for a in artifacts)
+            all_artifacts.extend(artifacts)
 
-        variables = {"artifact_paths": json.dumps(all_paths)}
+        selected = select_artifacts(all_artifacts, step.input_selector)
+
+        if not selected:
+            return []
+
+        variables = _build_template_variables(selected)
         params = _resolve_template(step.param_template, variables)
 
         created = []

@@ -104,6 +104,7 @@ Body (JSON):
       "plugin": "{other_or_same_plugin}",
       "task_type": "{task_type}",
       "param_template": { "input_image": "{artifact_path}" },
+      "input_selector": { "kind": "image", "pick": "first" },
       "outputs_per_input": 1
     }
   ],
