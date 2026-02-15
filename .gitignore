@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+data/
+sessions/
+downloads/
+screenshots/
+*.sqlite
+*.db
+.env
