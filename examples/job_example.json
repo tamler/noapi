@@ -1,0 +1,37 @@
+{
+    "project_name": "character_concepts",
+    "description": "Generate character concept art in multiple aspect ratios, then upscale the best results",
+    "expansions": [
+        {
+            "plugin": "example_service",
+            "task_type": "generate_image",
+            "param_template": {
+                "prompt": "A {character} warrior in a fantasy landscape, {style}",
+                "aspect_ratio": "{ratio}"
+            },
+            "expand_over": {
+                "character": ["bull", "bear"],
+                "ratio": ["1:1", "16:9"]
+            },
+            "variants": 2,
+            "ref_id": "base_images"
+        }
+    ],
+    "pipelines": [
+        {
+            "source_ref": "base_images",
+            "plugin": "example_service",
+            "task_type": "upscale_image",
+            "param_template": {
+                "input_image": "{artifact_path}",
+                "scale_factor": "2x"
+            },
+            "trigger_mode": "each",
+            "outputs_per_input": 1
+        }
+    ],
+    "global_params": {
+        "style": "cinematic lighting, detailed armor, 8k quality"
+    },
+    "naming_prefix": "char_concept"
+}
