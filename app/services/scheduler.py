@@ -29,6 +29,7 @@ def expand_variants(expansion: VariantExpansion, global_params: dict[str, Any]) 
     result: list[dict[str, Any]] = []
     for combo in itertools.product(*values):
         params = {**global_params, **expansion.param_template}
+        # Resolve expand_over placeholders
         for key, val in zip(keys, combo):
             resolved: dict[str, Any] = {}
             for pk, pv in params.items():
@@ -37,6 +38,13 @@ def expand_variants(expansion: VariantExpansion, global_params: dict[str, Any]) 
                 else:
                     resolved[pk] = pv
             params = resolved
+        # Resolve global_params placeholders (e.g. {style} from global_params)
+        for gk, gv in global_params.items():
+            if gk in expansion.expand_over:
+                continue
+            for pk, pv in list(params.items()):
+                if isinstance(pv, str) and f"{{{gk}}}" in pv:
+                    params[pk] = pv.replace(f"{{{gk}}}", str(gv))
         for _ in range(expansion.variants):
             result.append(dict(params))
     return result

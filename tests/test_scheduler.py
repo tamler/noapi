@@ -151,3 +151,20 @@ def test_expand_variants_simple():
     assert len(result) == 4
     prompts = {r["prompt"] for r in result}
     assert prompts == {"X and 1", "X and 2", "Y and 1", "Y and 2"}
+
+
+def test_expand_variants_resolves_global_params_placeholders():
+    from app.schemas import VariantExpansion
+    exp = VariantExpansion(
+        plugin="x", task_type="y",
+        param_template={"prompt": "A {character} warrior, {style}"},
+        expand_over={"character": ["bull", "bear"]},
+        variants=1,
+    )
+    result = expand_variants(exp, {"style": "cinematic lighting, 8k"})
+    assert len(result) == 2
+    prompts = {r["prompt"] for r in result}
+    assert prompts == {
+        "A bull warrior, cinematic lighting, 8k",
+        "A bear warrior, cinematic lighting, 8k",
+    }
