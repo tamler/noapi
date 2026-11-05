@@ -29,7 +29,7 @@
 **Step 1: Initialize git repo**
 
 ```bash
-cd /Users/jacob/Projects/noapi
+cd noapi
 git init
 ```
 
